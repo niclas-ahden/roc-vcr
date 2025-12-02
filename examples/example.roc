@@ -1,5 +1,6 @@
 app [main!] {
     pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.20.0/X73hGh05nNTkDHU06FHC0YfFaQB1pimX7gncRcao5mU.tar.br",
+    # vcr: "https://github.com/niclas-ahden/roc-vcr/releases/download/0.1.0/_ZYAPfxP9sxBnqjLWeNWv0jiASRunEGPpkcH3UStOT8.tar.br",
     vcr: "../package/main.roc",
 }
 
@@ -44,7 +45,7 @@ main! = |_args|
 
     response = client!(request)?
 
-    _ = Stdout.line!("Response status: $(Num.to_str(response.status))")?
+    _ = Stdout.line!("Response status: ${Num.to_str(response.status)}")?
 
     # Parse the response body
     when Str.from_utf8(response.body) is
@@ -59,7 +60,8 @@ main! = |_args|
                     |> Str.concat("...")
                 else
                     body_str
-            Stdout.line!("Response preview: $(preview)")
+
+            Stdout.line!("Response preview: ${preview}")
 
         Err(_) ->
             Stdout.line!("Could not decode response body as UTF-8")

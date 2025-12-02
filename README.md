@@ -24,7 +24,7 @@ VCR solves this by recording real HTTP interactions once, then replaying them fr
 ```roc
 app [main!] {
     pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.20.0/X73hGh05nNTkDHU06FHC0YfFaQB1pimX7gncRcao5mU.tar.br",
-    vcr: "package/main.roc",
+    vcr: "https://github.com/niclas-ahden/roc-vcr/releases/download/0.1.0/_ZYAPfxP9sxBnqjLWeNWv0jiASRunEGPpkcH3UStOT8.tar.br",
 }
 
 import pf.Stdout

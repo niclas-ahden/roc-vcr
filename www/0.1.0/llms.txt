@@ -1,0 +1,74 @@
+# LLM Docs
+
+## Compact Docs
+
+Copy just this section if you want to keep your context small.
+If you want all docs, check the section `Full Docs per Module` below.
+
+Vcr.Mode : [ Replay, Once, Replace ]
+Vcr.init! : Config err file_err, Str => Request => Result Response err where file_err implements Inspect
+
+## Full Docs per Module
+### Vcr
+
+Mode : [ Replay, Once, Replace ]
+
+Description:
+Recording mode that determines VCR behavior.
+- `Once`: Record if cassette doesn't exist, replay otherwise (does not record new interactions in an existing cassette)
+- `Replay`: Only replay from cassette, crash if cassette or interaction not found
+- `Replace`: Delete cassette and record fresh interactions
+
+Description:
+Request timeout configuration. Matches `basic-cli`.
+
+Description:
+HTTP request. Matches `basic-cli` exactly so you can pass `Http.send!` directly.
+
+Description:
+HTTP response. Compatible with `basic-cli`.
+
+Description:
+A single HTTP interaction: one request paired with its response.
+
+Description:
+A cassette containing recorded HTTP interactions. Named after VHS cassette tapes.
+
+Description:
+Request as stored in cassette JSON. Method is a string, timeout is omitted.
+Useful if you need to decode cassette files directly.
+
+Description:
+Interaction as stored in cassette JSON.
+
+Description:
+Cassette as stored in JSON files. Use with `roc-json` to decode cassettes directly.
+
+Description:
+VCR configuration.
+
+- `mode`: Recording mode (`Once`, `Replay`, `Replace`)
+- `cassette_dir`: Directory for cassette files
+- `remove_headers`: Headers to strip from recordings
+- `replace_sensitive_data`: Find/replace sensitive data
+- `before_record`: Transform before recording
+- `before_replay`: Transform before replaying
+- `skip_interactions`: Number of interactions to skip when matching (useful when making duplicate requests and wanting to match a later one)
+- `http_send!`: Pass `Http.send!` or equivalent from your platform
+- `file_read!`: Pass `File.read_bytes!` or equivalent from your platform
+- `file_write!`: Pass `File.write_bytes!` or equivalent from your platform
+- `file_delete!`: Pass `File.delete!` or equivalent from your platform
+
+init! : Config err file_err, Str => Request => Result Response err where file_err implements Inspect
+
+Description:
+Create a VCR client for a specific cassette. Returns a function that works like `Http.send!`.
+
+```roc
+client! = Vcr.init!(config, "my_api_test")
+response = client!(request)?  # Records or replays based on mode
+```
+
+The returned client handles recording and replay automatically based on the config mode.
+Crashes with a descriptive message on VCR errors (decode failures, missing interactions in Replay mode, etc.).
+

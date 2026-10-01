@@ -7,8 +7,8 @@
 .envrc
 generated-docs/
 
-# Test cassettes (generated during test runs)
-test/cassettes/
-test/mock_cassettes/
-test/crash/cassettes/
-test/crash/cassettes_readonly/
+# Cassettes recorded by the tests
+tests/tmp/
+
+# The catch-alls above ignore extensionless files, but this one must ship
+!LICENSE

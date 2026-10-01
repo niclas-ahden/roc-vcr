@@ -1,0 +1,20 @@
+{
+  "name": "recorded_before_scrubbing",
+  "interactions": [
+    {
+      "request": {
+        "method": "POST",
+        "uri": "https://api.test.com/login?api_key=OLD_KEY",
+        "headers": [
+          { "name": "Authorization", "value": "Bearer OLD_TOKEN" }
+        ],
+        "body": "{\"user\":\"bob\",\"password\":\"old-password\"}"
+      },
+      "response": {
+        "status": 200,
+        "headers": [],
+        "body": "logged in"
+      }
+    }
+  ]
+}

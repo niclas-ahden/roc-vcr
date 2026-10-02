@@ -119,22 +119,18 @@ VCR_MODE=replace ./tests.roc create_invoice
 
 Why no `Record`? People seem to disagree on what `Record` means (is it the equivalent of `Replace`? or `Once`? or does it always record all new interactions without replacing old ones?) We chose the names above to try and make the API more obvious.
 
-## One client per cassette
+## Handling multiple identical requests
 
-A client settles its mode when `Vcr.init!` creates it. That is when `Replace` deletes the old cassette, when `Once` decides whether to record, and when a replay reads the cassette. So give every cassette exactly one client. A client never sees what another client does to its cassette.
-
-A replay answers a request with the first recording that matches it, so a request sent again gets the same answer. When a test expects a new answer to the same request, say it reads an invoice, pays it and reads it again, record the part after the change into a cassette of its own:
+A replay answers a request with the first recording that matches it, so a request sent again gets the same answer. When a test expects a new answer to the same request (say it reads an invoice, pays it and reads it again), record the part after the change into a cassette of its own:
 
 ```roc
 client! = Vcr.init!(config, "pay_invoice")?
 unpaid = Invoices.get!(client!, token, "42")?
 Invoices.pay!(client!, token, "42")?
 
-after_paying! = Vcr.init!(config, "pay_invoice_after")?
-paid = Invoices.get!(after_paying!, token, "42")?
+paid_invoice_client! = Vcr.init!(config, "paid_invoice")?
+paid = Invoices.get!(paid_invoice_client!, token, "42")?
 ```
-
-The second client can be created at any point, since it has a cassette to itself.
 
 When your code repeats a request by itself, as when it polls a job until it is done, a replay gives it the first recorded answer every time. A client cannot count the requests it has answered, since a Roc function keeps no state between calls, so a test of such code needs a fake `http_send!` of its own instead.
 
@@ -299,7 +295,7 @@ To read a cassette in your own code, use `Vcr.decode_cassette`, and `Vcr.encode_
 - The client takes and returns roc-lang/http's `Request` and `Response`, the types of basic-cli's `Http.send!`. Build requests with `Request.from_method(GET).with_uri(...)` and read responses with `.status()`, `.headers()` and `.body()`. `Vcr.Request`, `Vcr.Response`, `Vcr.Method`, `Vcr.Header` and `Vcr.Timeout` are gone.
 - Code that took a record-based HTTP function can now take `Http.send!` as it is, so an adapter around it can go.
 - `Vcr.init!` returns a `Try`: `client! = Vcr.init!(config, "name")?`. A missing, unreadable or broken cassette is an error from `init!` instead of a crash.
-- `skip_interactions` is gone. Give the part of a test that expects a new answer to the same request a cassette of its own, see [One client per cassette](#one-client-per-cassette).
+- `skip_interactions` is gone. Give the part of a test that expects a new answer to the same request a cassette of its own, see [Handling multiple identical requests](#handling-multiple-identical-requests).
 - The config has defaults now. Remove `before_record: |interaction| interaction`, `before_replay: |interaction| interaction`, `skip_interactions: 0`, `remove_headers: []` and `replace_sensitive_data: []`.
 - `file_read!`, `file_write!` and `file_delete!` are gone. `cassette_dir` is a path instead of a `Str`: `Path.utf8("tests/cassettes")`.
 - `mode` defaults to `Replay`. Read it with `Vcr.parse_mode` to re-record without editing the test.

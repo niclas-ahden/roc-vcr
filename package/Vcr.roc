@@ -95,7 +95,7 @@ Vcr := [].{
 	## `mode`: see [Mode]. Defaults to `Replay`.
 	##
 	## `redact`: more names whose values are kept out of the cassette, on top
-	## of the ones that always are. Defaults to `[]`.
+	## of the built-in ones. Defaults to `[]`.
 	##
 	## `dont_redact`: names whose secrets stay in the cassette after all,
 	## whichever rule below found them, such as a token that pages through
@@ -117,7 +117,8 @@ Vcr := [].{
 	## match too, in any case. Defaults to `[]`, so headers do not count. See
 	## [init!] for how a request is matched.
 	##
-	## These never reach a cassette, with no config needed:
+	## Scrubbing is best effort. With no config, it keeps these out of a
+	## cassette:
 	##
 	## - the credentials of `Authorization` and `Proxy-Authorization`, which
 	##   keep their scheme, as in `Bearer <CREDENTIALS>`
@@ -128,6 +129,12 @@ Vcr := [].{
 	## - the value of every name that ends in `token`, `secret`, `password`,
 	##   `passwd`, `pwd`, `api_key`, `private_key`, `access_key` or
 	##   `secret_key`, and of every name in `redact`
+	##
+	## It finds a secret by its name or its shape, so it misses some, such as
+	## Google's `key=` parameter, Azure's `sig=` or a password in XML. Name the
+	## secrets of the API you test with `redact`, `remove_headers`,
+	## `replace_sensitive_data`, `filter_request` and `filter_response`, and
+	## read a cassette before you commit it.
 	##
 	## A token that pages through results is no secret, so it stays: a name
 	## that ends in `token` and has `page`, `next`, `continuation`, `sync` or

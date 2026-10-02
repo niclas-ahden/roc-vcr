@@ -226,16 +226,24 @@ secret_at = |bytes, index, names| {
 	}
 }
 
+## What separates the scheme of a URL from the rest
+url_separator : List(U8)
+url_separator = "://".to_utf8()
+
+## [url_separator] in JSON, which may escape `/` as `\/`
+json_url_separator : List(U8)
+json_url_separator = ":\\/\\/".to_utf8()
+
 ## The user and password of the URL whose `://` is at `index`, written
 ## `:\/\/` in JSON too. They run to the last `@` of the authority, as a URL
 ## parser reads them, so a password may hold an `@`.
 user_info_at : List(U8), U64 -> [Found(Secret), Next(U64)]
 user_info_at = |bytes, index| {
 	start =
-		if starts_with_at(bytes, index, "://") {
-			Ok(index + 3)
-		} else if starts_with_at(bytes, index, ":\\/\\/") {
-			Ok(index + 5)
+		if starts_with_at(bytes, index, url_separator) {
+			Ok(index + url_separator.len())
+		} else if starts_with_at(bytes, index, json_url_separator) {
+			Ok(index + json_url_separator.len())
 		} else {
 			Err(NotAUrl)
 		}
@@ -261,6 +269,11 @@ bearer_token = |bytes, name_end|
 	} else {
 		Err(NotFound)
 	}
+
+## The JSON values a secret name keeps, since none of them is a secret and
+## a placeholder would not decode as one
+json_literals : List(List(U8))
+json_literals = ["null", "true", "false"].map(Str.to_utf8)
 
 ## The value of the secret name from `name_start` to `name_end`. A name
 ## counts where `=` follows it, and where `:` follows it in quotes, as in
@@ -289,7 +302,7 @@ value_of = |bytes, name_start, name_end| {
 				end = unquoted_end(bytes, value_at)
 				first = bytes.get(value_at).ok_or(0)
 				value = bytes.sublist({ start: value_at, len: end - value_at })
-				if end == value_at or first == '{' or first == '[' or ["null", "true", "false"].any(|word| value == word.to_utf8()) {
+				if end == value_at or first == '{' or first == '[' or json_literals.contains(value) {
 					Err(NotFound)
 				} else if quoted and separator == ':' {
 					Ok({ start: value_at, end, replacement: quote.concat(hidden).concat(quote) })
@@ -370,6 +383,10 @@ backslashes_before = |bytes, index, floor| {
 	index - $i
 }
 
+## What a field starts after, see [begins_field]
+field_starts : List(U8)
+field_starts = "\n\r{([,;".to_utf8()
+
 ## Whether the name at `index` starts a field: only spaces stand between it
 ## and the start of the text, a line break, an opening bracket, `,` or `;`.
 ## That is where a `name: value` line or an object puts a name, while a
@@ -380,7 +397,7 @@ begins_field = |bytes, index| {
 	while $i > 0 and is_space(bytes.get($i - 1).ok_or(0)) {
 		$i = $i - 1
 	}
-	$i == 0 or "\n\r{([,;".to_utf8().contains(bytes.get($i - 1).ok_or(0))
+	$i == 0 or field_starts.contains(bytes.get($i - 1).ok_or(0))
 }
 
 ## Where an unquoted value from `start` ends: at a byte that
@@ -420,11 +437,8 @@ placeholder_end = |bytes, index|
 	}
 
 ## Whether `needle` is at `index` of `bytes`
-starts_with_at : List(U8), U64, Str -> Bool
-starts_with_at = |bytes, index, needle| {
-	needle_bytes = needle.to_utf8()
-	bytes.sublist({ start: index, len: needle_bytes.len() }) == needle_bytes
-}
+starts_with_at : List(U8), U64, List(U8) -> Bool
+starts_with_at = |bytes, index, needle| bytes.sublist({ start: index, len: needle.len() }) == needle
 
 ## The last `needle` in `bytes` from `start` up to `end`
 last_index_of : List(U8), U8, U64, U64 -> Try(U64, [NotFound])
@@ -455,13 +469,18 @@ is_value_end : U8 -> Bool
 is_value_end = |byte|
 	is_space(byte) or byte == '\n' or byte == '\r' or byte == '"' or byte == '\'' or byte == '\\' or byte == '<' or byte == '>' or byte == '&' or byte == ',' or byte == ';' or byte == '#' or byte == ')' or byte == ']' or byte == '}'
 
+## The bytes besides letters and digits that the authority of a URL is made
+## of, see [is_authority_byte]
+authority_symbols : List(U8)
+authority_symbols = "-._~%!$&'()*+,;=:@[]<>".to_utf8()
+
 ## What the authority of a URL is made of, per RFC 3986: letters, digits,
 ## any byte of a non-ASCII character, and `-._~%!$&'()*+,;=:@[]`. `<` and
 ## `>` count too, so a placeholder is found again. Anything else ends it, a
 ## `/`, `?`, `#`, `\`, blank or `"` included.
 is_authority_byte : U8 -> Bool
 is_authority_byte = |byte|
-	(byte >= '0' and byte <= '9') or (byte >= 'A' and byte <= 'Z') or (byte >= 'a' and byte <= 'z') or byte >= 128 or "-._~%!$&'()*+,;=:@[]<>".to_utf8().contains(byte)
+	(byte >= '0' and byte <= '9') or (byte >= 'A' and byte <= 'Z') or (byte >= 'a' and byte <= 'z') or byte >= 128 or authority_symbols.contains(byte)
 
 ## The index after the spaces from `start`
 skip_spaces : List(U8), U64 -> U64

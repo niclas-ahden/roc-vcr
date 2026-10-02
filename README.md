@@ -46,7 +46,7 @@ Your app passes it basic-cli's `Http.send!`, as in `Invoices.get!(Http.send!, to
 app [main!] {
 	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.26.0/EuuihZ91yAY1ANck1QytRBcW2jexEfH6yVmxcPCHEHDz.tar.zst",
 	http: "https://github.com/roc-lang/http/releases/download/2.0.0/6ZUwqYhCS8PU9Mo6MF7oV82ET2o7KYb57CLKDq4cq4sS.tar.zst",
-	vcr: "https://github.com/niclas-ahden/roc-vcr/releases/download/0.1.0/_ZYAPfxP9sxBnqjLWeNWv0jiASRunEGPpkcH3UStOT8.tar.br",
+	vcr: "https://github.com/niclas-ahden/roc-vcr/releases/download/0.2.0/EDAmTVryPRkfrpLJyyDNEqftSQ7TyUWN9XomuxA1h1dE.tar.zst",
 }
 
 import pf.Env

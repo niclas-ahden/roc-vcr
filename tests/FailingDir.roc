@@ -1,7 +1,7 @@
 ## A cassette directory on disk whose writes or deletes fail on purpose, to
 ## reach errors a real disk rarely gives. It is also what wrapping a
 ## platform's path type looks like, when one is not a `cassette_dir` as it is.
-import pf.Path exposing [Path]
+import pf.Path
 
 FailingDir := { path : Path, failing : [Write, Delete] }.{
 	join = |dir, name| FailingDir.{ path: dir.path.join(name), failing: dir.failing }

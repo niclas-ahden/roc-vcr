@@ -5,7 +5,7 @@ app [main!] {
 	vcr: "../package/main.roc",
 }
 
-import pf.OsStr exposing [OsStr]
+import pf.OsStr
 import vcr.Vcr
 import Support
 

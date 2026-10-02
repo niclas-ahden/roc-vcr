@@ -5,10 +5,10 @@ app [main!] {
 	vcr: "../package/main.roc",
 }
 
-import pf.OsStr exposing [OsStr]
+import pf.OsStr
 import spec.Assert
 import vcr.Vcr
-import FailingDir exposing [FailingDir]
+import FailingDir
 import Support
 
 cassette_name : Str

@@ -17,7 +17,7 @@ app [main!] {
 
 import pf.Cmd
 import pf.Env
-import pf.OsStr exposing [OsStr]
+import pf.OsStr
 import pf.Path
 import pf.Sleep
 import pf.Stderr

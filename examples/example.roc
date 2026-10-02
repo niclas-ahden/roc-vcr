@@ -17,7 +17,7 @@ app [main!] {
 
 import pf.Env
 import pf.Http
-import pf.OsStr exposing [OsStr]
+import pf.OsStr
 import pf.Path
 import pf.Stdout
 import http.Request

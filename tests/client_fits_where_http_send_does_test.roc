@@ -6,9 +6,9 @@ app [main!] {
 }
 
 import pf.Http
-import pf.OsStr exposing [OsStr]
-import http.Request exposing [Request]
-import http.Response exposing [Response]
+import pf.OsStr
+import http.Request
+import http.Response
 import spec.Assert
 import vcr.Vcr
 import Support

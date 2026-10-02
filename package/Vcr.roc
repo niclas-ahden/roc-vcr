@@ -3,10 +3,10 @@
 ## VCR (Video Cassette Recorder) is a testing pattern where HTTP requests and responses are recorded to disk the first time they're made, then replayed in subsequent test runs. This makes your tests fast, deterministic, and independent of external services.
 ##
 ## Inspired by Ruby's excellent [VCR gem](https://github.com/vcr/vcr). `roc-vcr` brings a similar approach to Roc.
-import http.Header exposing [Header]
-import http.Method exposing [Method]
-import http.Request exposing [Request]
-import http.Response exposing [Response]
+import http.Header
+import http.Method
+import http.Request
+import http.Response
 import base64.Base64
 
 Vcr := [].{

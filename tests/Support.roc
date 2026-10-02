@@ -3,10 +3,10 @@
 ##
 ## No test touches the network. Recording tests use the mock, which answers
 ## with an echo of the request, and write their cassettes to `tests/tmp`.
-import pf.Path exposing [Path]
-import http.Method exposing [Method]
-import http.Request exposing [Request]
-import http.Response exposing [Response]
+import pf.Path
+import http.Method
+import http.Request
+import http.Response
 import vcr.Vcr
 
 Support :: [].{

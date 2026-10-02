@@ -6,31 +6,33 @@
 ## and then [replace_secrets] replaces the ones `dont_redact` does not name.
 Scrub := [].{
 
-	## The names of a config that change what is redacted, [normalized]:
-	## `redact` adds names to the ones [is_secret_name] finds, and
-	## `dont_redact` names the secrets that stay, unless `redact` names them
-	## too
-	Names : {
+	## What a config changes about redaction, with the names [normalized]:
+	## `built_in` says whether the built-in rules apply at all, `redact` adds
+	## names to the ones [is_secret_name] finds, and `dont_redact` names the
+	## secrets that stay, unless `redact` names them too
+	Rules : {
+		built_in : Bool,
 		redact : List(Str),
 		dont_redact : List(Str),
 	}
 
-	## The [Names] of a config's `redact` and `dont_redact`
-	names_from : List(Str), List(Str) -> Names
-	names_from = |redact, dont_redact| {
+	## The [Rules] of a config's `auto_redact`, `redact` and `dont_redact`
+	rules_from : [On, Off], List(Str), List(Str) -> Rules
+	rules_from = |auto_redact, redact, dont_redact| {
+		built_in: auto_redact == On,
 		redact: redact.map(|name| normalized(name.to_utf8())),
 		dont_redact: dont_redact.map(|name| normalized(name.to_utf8())),
 	}
 
 	## `text` with every secret in it replaced, except the ones `dont_redact`
 	## names
-	text : Str, Names -> Str
-	text = |text, names| replace_secrets(text, secrets_in(text.to_utf8(), names), names)
+	text : Str, Rules -> Str
+	text = |text, rules| replace_secrets(text, secrets_in(text.to_utf8(), rules), rules)
 
 	## The value of the header `name` with its secrets replaced, except the
 	## ones `dont_redact` names
-	header : Str, Str, Names -> Str
-	header = |name, value, names| replace_secrets(value, header_secrets(name, value, names), names)
+	header : Str, Str, Rules -> Str
+	header = |name, value, rules| replace_secrets(value, header_secrets(name, value, rules), rules)
 }
 
 ## A secret in some text: the bytes from `start` to `end`, what replaces
@@ -41,9 +43,9 @@ Secret : { start : U64, end : U64, replacement : List(U8), name : Str }
 ## `text` with its `secrets` replaced, except the ones [is_kept]. The secrets
 ## are in order and do not overlap. One that is kept stays as it is, with
 ## nothing inside it replaced.
-replace_secrets : Str, List(Secret), Scrub.Names -> Str
-replace_secrets = |text, secrets, names| {
-	replaced = secrets.keep_if(|secret| !is_kept(secret.name, names))
+replace_secrets : Str, List(Secret), Scrub.Rules -> Str
+replace_secrets = |text, secrets, rules| {
+	replaced = secrets.keep_if(|secret| !is_kept(secret.name, rules))
 	if replaced.is_empty() {
 		text
 	} else {
@@ -61,8 +63,8 @@ replace_secrets = |text, secrets, names| {
 
 ## Whether `dont_redact` has the [normalized] name a secret was found by and
 ## `redact` does not. A secret with no name is never kept.
-is_kept : Str, Scrub.Names -> Bool
-is_kept = |name, names| !name.is_empty() and names.dont_redact.contains(name) and !names.redact.contains(name)
+is_kept : Str, Scrub.Rules -> Bool
+is_kept = |name, rules| !name.is_empty() and rules.dont_redact.contains(name) and !rules.redact.contains(name)
 
 ## What replaces the user and password of a URL and the credentials of a
 ## request
@@ -104,38 +106,40 @@ paging_words = ["page", "next", "continuation", "sync", "cursor"]
 is_paging_token : Str -> Bool
 is_paging_token = |key| key.ends_with("token") and paging_words.any(|word| key.contains(word))
 
-## Whether the [normalized] name `key` holds a secret: `redact` has it, or it
-## ends in one of the [secret_endings] and is not a paging token
-is_secret_name : Str, Scrub.Names -> Bool
-is_secret_name = |key, names|
-	names.redact.contains(key) or (secret_endings.any(|ending| key.ends_with(ending)) and !is_paging_token(key))
+## Whether the [normalized] name `key` holds a secret: `redact` has it, or
+## the built-in rules apply and it ends in one of the [secret_endings] and is
+## not a paging token
+is_secret_name : Str, Scrub.Rules -> Bool
+is_secret_name = |key, rules|
+	rules.redact.contains(key) or (rules.built_in and secret_endings.any(|ending| key.ends_with(ending)) and !is_paging_token(key))
 
-## The secrets in the value of the header `name`. `Authorization` hides its
-## credentials and keeps its scheme, as in `Bearer <CREDENTIALS>`, and a
-## cookie header hides the value of every cookie and keeps its name, as in
-## `session=<SESSION>`. A header whose own name holds a secret hides its
-## whole value, and any other has the [secrets_in] its value.
-header_secrets : Str, Str, Scrub.Names -> List(Secret)
-header_secrets = |name, value, names| {
+## The secrets in the value of the header `name`. With the built-in rules,
+## `Authorization` hides its credentials and keeps its scheme, as in
+## `Bearer <CREDENTIALS>`, and a cookie header hides the value of every
+## cookie and keeps its name, as in `session=<SESSION>`. A header whose own
+## name holds a secret hides its whole value, and any other has the
+## [secrets_in] its value.
+header_secrets : Str, Str, Scrub.Rules -> List(Secret)
+header_secrets = |name, value, rules| {
 	key = normalized(name.to_utf8())
 	bytes = value.to_utf8()
 	whole = |replacement| [{ start: 0, end: bytes.len(), replacement: replacement.to_utf8(), name: key }]
 	if value.is_empty() {
 		[]
-	} else if key == "authorization" or key == "proxyauthorization" {
+	} else if rules.built_in and (key == "authorization" or key == "proxyauthorization") {
 		match value.trim().split_first(" ") {
 			Ok({ before, after }) if !after.trim().is_empty() => whole("${before} ${credentials}")
 			_ => whole(credentials)
 		}
-	} else if key == "cookie" {
+	} else if rules.built_in and key == "cookie" {
 		cookie_secrets(bytes, bytes.len())
-	} else if key == "setcookie" {
+	} else if rules.built_in and key == "setcookie" {
 		# Only the first part is the cookie, the rest are its attributes
 		cookie_secrets(bytes, token_end(bytes, 0, |byte| byte == ';'))
-	} else if is_secret_name(key, names) {
+	} else if is_secret_name(key, rules) {
 		whole(placeholder(name))
 	} else {
-		secrets_in(bytes, names)
+		secrets_in(bytes, rules)
 	}
 }
 
@@ -176,16 +180,17 @@ cookie_secret = |bytes, start, end| {
 	}
 }
 
-## The secrets in `bytes`, in order: the user and password of a URL, the
-## token after `Bearer`, and the value of every name that [is_secret_name].
-## One pass, so a big body takes no longer than it has to.
-secrets_in : List(U8), Scrub.Names -> List(Secret)
-secrets_in = |bytes, names| {
+## The secrets in `bytes`, in order: with the built-in rules, the user and
+## password of a URL and the token after `Bearer`, and the value of every
+## name that [is_secret_name]. One pass, so a big body takes no longer than
+## it has to.
+secrets_in : List(U8), Scrub.Rules -> List(Secret)
+secrets_in = |bytes, rules| {
 	len = bytes.len()
 	var $secrets = []
 	var $i = 0
 	while $i < len {
-		match secret_at(bytes, $i, names) {
+		match secret_at(bytes, $i, rules) {
 			Found(secret) => {
 				$secrets = $secrets.append(secret)
 				$i = secret.end
@@ -200,19 +205,19 @@ secrets_in = |bytes, names| {
 
 ## The secret that starts at `index`, or the index to look at next. A name
 ## is read whole, so every byte is looked at about once.
-secret_at : List(U8), U64, Scrub.Names -> [Found(Secret), Next(U64)]
-secret_at = |bytes, index, names| {
+secret_at : List(U8), U64, Scrub.Rules -> [Found(Secret), Next(U64)]
+secret_at = |bytes, index, rules| {
 	byte = bytes.get(index).ok_or(0)
-	if byte == ':' {
+	if byte == ':' and rules.built_in {
 		user_info_at(bytes, index)
 	} else if is_name_byte(byte) and !(index > 0 and is_name_byte(bytes.get(index - 1).ok_or(0))) {
 		name_end = token_end(bytes, index, |b| !is_name_byte(b))
 		name = bytes.sublist({ start: index, len: name_end - index })
 		key = normalized(name)
 		found =
-			if key == "bearer" {
+			if rules.built_in and key == "bearer" {
 				bearer_token(bytes, name_end)
-			} else if is_secret_name(key, names) {
+			} else if is_secret_name(key, rules) {
 				value_of(bytes, index, name_end)
 			} else {
 				Err(NotFound)
@@ -499,36 +504,36 @@ token_end = |bytes, start, stop| {
 
 # Tests, run with roc test package/main.roc
 
-## The [Scrub.Names] of a config that names none
-no_names : Scrub.Names
-no_names = Scrub.names_from([], [])
+## The [Scrub.Rules] of a config that changes none of them
+default_rules : Scrub.Rules
+default_rules = Scrub.rules_from(On, [], [])
 
 ## `text` scrubbed with the names in `redact` on top of the built-in ones
 scrubbed : Str, List(Str) -> Str
-scrubbed = |text, redact| Scrub.text(text, Scrub.names_from(redact, []))
+scrubbed = |text, redact| Scrub.text(text, Scrub.rules_from(On, redact, []))
 
 ## `text` as a JSON string, to put JSON inside JSON
 json_string : Str -> Str
 json_string = |text| "\"${text.replace_each("\\", "\\\\").replace_each("\"", "\\\"").replace_each("\n", "\\n")}\""
 
 # Headers
-expect Scrub.header("Authorization", "Bearer abc", no_names) == "Bearer <CREDENTIALS>"
-expect Scrub.header("proxy-authorization", "Basic dXNlcjpwdw==", no_names) == "Basic <CREDENTIALS>"
-expect Scrub.header("Authorization", "abc", no_names) == "<CREDENTIALS>"
-expect Scrub.header("Cookie", "session=abc; lang=en; theme=; flag", no_names) == "session=<SESSION>; lang=<LANG>; theme=; <COOKIE>"
-expect Scrub.header("Set-Cookie", "id=a3f; Path=/; Secure; HttpOnly", no_names) == "id=<ID>; Path=/; Secure; HttpOnly"
-expect Scrub.header("X-Api-Key", "abc", no_names) == "<X-API-KEY>"
-expect Scrub.header("X-Partner", "abc", Scrub.names_from(["x-partner"], [])) == "<X-PARTNER>"
-expect Scrub.header("Link", "<https://g.com/x?access_token=abc>; rel=\"next\"", no_names) == "<https://g.com/x?access_token=<ACCESS_TOKEN>>; rel=\"next\""
-expect Scrub.header("Accept", "application/json", no_names) == "application/json"
-expect Scrub.header("Authorization", "", no_names) == ""
+expect Scrub.header("Authorization", "Bearer abc", default_rules) == "Bearer <CREDENTIALS>"
+expect Scrub.header("proxy-authorization", "Basic dXNlcjpwdw==", default_rules) == "Basic <CREDENTIALS>"
+expect Scrub.header("Authorization", "abc", default_rules) == "<CREDENTIALS>"
+expect Scrub.header("Cookie", "session=abc; lang=en; theme=; flag", default_rules) == "session=<SESSION>; lang=<LANG>; theme=; <COOKIE>"
+expect Scrub.header("Set-Cookie", "id=a3f; Path=/; Secure; HttpOnly", default_rules) == "id=<ID>; Path=/; Secure; HttpOnly"
+expect Scrub.header("X-Api-Key", "abc", default_rules) == "<X-API-KEY>"
+expect Scrub.header("X-Partner", "abc", Scrub.rules_from(On, ["x-partner"], [])) == "<X-PARTNER>"
+expect Scrub.header("Link", "<https://g.com/x?access_token=abc>; rel=\"next\"", default_rules) == "<https://g.com/x?access_token=<ACCESS_TOKEN>>; rel=\"next\""
+expect Scrub.header("Accept", "application/json", default_rules) == "application/json"
+expect Scrub.header("Authorization", "", default_rules) == ""
 
 # Scrubbing a header again changes nothing more
 expect
 	[("Authorization", "Bearer abc"), ("Authorization", "abc"), ("Cookie", "a=1; b"), ("Set-Cookie", "id=1; Path=/"), ("X-Api-Key", "k")].all(
 		|(name, value)| {
-			once = Scrub.header(name, value, no_names)
-			Scrub.header(name, once, no_names) == once
+			once = Scrub.header(name, value, default_rules)
+			Scrub.header(name, once, default_rules) == once
 		},
 	)
 
@@ -591,32 +596,45 @@ expect {
 	scrubbed("${paging}&access_token=x", []) == "${paging}&access_token=<ACCESS_TOKEN>"
 }
 expect scrubbed("{\"items\":[],\"nextPageToken\":\"CAUQAA\"}", []) == "{\"items\":[],\"nextPageToken\":\"CAUQAA\"}"
-expect Scrub.header("X-Next-Page-Token", "CAUQAA", no_names) == "CAUQAA"
+expect Scrub.header("X-Next-Page-Token", "CAUQAA", default_rules) == "CAUQAA"
 
 # A name in `dont_redact` is left, found the way any name is
-expect Scrub.text("resume_token=a&Marker-Token=b&refresh_token=c", Scrub.names_from([], ["resumeToken", "marker_token"])) == "resume_token=a&Marker-Token=b&refresh_token=<REFRESH_TOKEN>"
-expect Scrub.header("X-Resume-Token", "abc", Scrub.names_from([], ["x_resume_token"])) == "abc"
+expect Scrub.text("resume_token=a&Marker-Token=b&refresh_token=c", Scrub.rules_from(On, [], ["resumeToken", "marker_token"])) == "resume_token=a&Marker-Token=b&refresh_token=<REFRESH_TOKEN>"
+expect Scrub.header("X-Resume-Token", "abc", Scrub.rules_from(On, [], ["x_resume_token"])) == "abc"
 
 # `redact` wins over the paging rule and over `dont_redact`, whichever rule
 # found the secret
-expect Scrub.text("page_token=a&x_token=b", Scrub.names_from(["page_token", "x_token"], ["x_token"])) == "page_token=<PAGE_TOKEN>&x_token=<X_TOKEN>"
-expect Scrub.header("Authorization", "Bearer abc", Scrub.names_from(["authorization"], ["authorization"])) == "Bearer <CREDENTIALS>"
-expect Scrub.header("Cookie", "lang=en", Scrub.names_from(["lang"], ["lang"])) == "lang=<LANG>"
+expect Scrub.text("page_token=a&x_token=b", Scrub.rules_from(On, ["page_token", "x_token"], ["x_token"])) == "page_token=<PAGE_TOKEN>&x_token=<X_TOKEN>"
+expect Scrub.header("Authorization", "Bearer abc", Scrub.rules_from(On, ["authorization"], ["authorization"])) == "Bearer <CREDENTIALS>"
+expect Scrub.header("Cookie", "lang=en", Scrub.rules_from(On, ["lang"], ["lang"])) == "lang=<LANG>"
 
 # `dont_redact` takes out what any rule found, by the name it was found by
-expect Scrub.header("Authorization", "Bearer abc", Scrub.names_from([], ["authorization"])) == "Bearer abc"
-expect Scrub.header("Cookie", "session=abc; lang=en; flag", Scrub.names_from([], ["lang"])) == "session=<SESSION>; lang=en; <COOKIE>"
-expect Scrub.header("Set-Cookie", "lang=en; Path=/", Scrub.names_from([], ["lang"])) == "lang=en; Path=/"
-expect Scrub.text("Bearer abc postgres://u:p@db", Scrub.names_from([], ["bearer"])) == "Bearer abc postgres://<CREDENTIALS>@db"
+expect Scrub.header("Authorization", "Bearer abc", Scrub.rules_from(On, [], ["authorization"])) == "Bearer abc"
+expect Scrub.header("Cookie", "session=abc; lang=en; flag", Scrub.rules_from(On, [], ["lang"])) == "session=<SESSION>; lang=en; <COOKIE>"
+expect Scrub.header("Set-Cookie", "lang=en; Path=/", Scrub.rules_from(On, [], ["lang"])) == "lang=en; Path=/"
+expect Scrub.text("Bearer abc postgres://u:p@db", Scrub.rules_from(On, [], ["bearer"])) == "Bearer abc postgres://<CREDENTIALS>@db"
 
 # The user and password of a URL have no name, so no name keeps them
-expect Scrub.text("postgres://u:p@db", Scrub.names_from([], ["", "_", "postgres"])) == "postgres://<CREDENTIALS>@db"
+expect Scrub.text("postgres://u:p@db", Scrub.rules_from(On, [], ["", "_", "postgres"])) == "postgres://<CREDENTIALS>@db"
 
 # A value that stays is left whole, and the secrets after it are still found
 expect {
 	inner = json_string("{\"password\":\"x\"}")
 	text = "{\"sync_secret\":${inner},\"password\":\"y\"}"
-	Scrub.text(text, Scrub.names_from([], ["sync_secret"])) == "{\"sync_secret\":${inner},\"password\":\"<PASSWORD>\"}"
+	Scrub.text(text, Scrub.rules_from(On, [], ["sync_secret"])) == "{\"sync_secret\":${inner},\"password\":\"<PASSWORD>\"}"
+}
+
+# With the built-in rules off, only the names in `redact` are found, the
+# way they are with the rules on
+expect {
+	off = Scrub.rules_from(Off, ["session", "x_partner", "pin"], [])
+	text_ok = Scrub.text("postgres://u:p@db Bearer abc access_token=a&pin=1&{\"pin\": 2}", off) == "postgres://u:p@db Bearer abc access_token=a&pin=<PIN>&{\"pin\": \"<PIN>\"}"
+	authorization_ok = Scrub.header("Authorization", "Bearer abc", off) == "Bearer abc"
+	cookie_ok = Scrub.header("Cookie", "session=abc; lang=en", off) == "session=<SESSION>; lang=en"
+	set_cookie_ok = Scrub.header("Set-Cookie", "session=abc; Path=/", off) == "session=<SESSION>; Path=/"
+	named_ok = Scrub.header("X-Partner", "abc", off) == "<X-PARTNER>" and Scrub.header("X-Api-Key", "abc", off) == "abc"
+	authorization_named_ok = Scrub.header("Authorization", "Bearer abc", Scrub.rules_from(Off, ["authorization"], [])) == "<AUTHORIZATION>"
+	text_ok and authorization_ok and cookie_ok and set_cookie_ok and named_ok and authorization_named_ok
 }
 
 # Scrubbing again changes nothing more
@@ -680,7 +698,7 @@ seeds = |count| {
 	$seeds
 }
 
-## Names that hold a secret, built-in and in [generated_names]
+## Names that hold a secret, built-in and in [generated_rules]
 secret_names : List(Str)
 secret_names = ["access_token", "password", "clientSecret", "API-KEY", "pin"]
 
@@ -688,9 +706,9 @@ secret_names = ["access_token", "password", "clientSecret", "API-KEY", "pin"]
 plain_names : List(Str)
 plain_names = ["id", "user", "has_password", "token_type", "nextPageToken", "author", "note"]
 
-## The names of the config every generated text is scrubbed with
-generated_names : Scrub.Names
-generated_names = Scrub.names_from(["pin"], [])
+## The rules every generated text is scrubbed with
+generated_rules : Scrub.Rules
+generated_rules = Scrub.rules_from(On, ["pin"], [])
 
 ## JSON values for a secret name
 secret_json_values : List(Str)
@@ -803,8 +821,8 @@ is_json = |text| {
 ## changes nothing
 scrubs_well : Str -> Bool
 scrubs_well = |text| {
-	once = Scrub.text(text, generated_names)
-	!once.contains(leak) and !once.contains("90210") and Scrub.text(once, generated_names) == once
+	once = Scrub.text(text, generated_rules)
+	!once.contains(leak) and !once.contains("90210") and Scrub.text(once, generated_rules) == once
 }
 
 # Valid JSON stays valid, every secret is gone, and scrubbing again changes
@@ -813,9 +831,16 @@ expect
 	seeds(300).all(
 		|seed| {
 			text = json_object(seed, 2).text
-			is_json(text) and is_json(Scrub.text(text, generated_names)) and scrubs_well(text)
+			is_json(text) and is_json(Scrub.text(text, generated_rules)) and scrubs_well(text)
 		},
 	)
 
 # The same for query strings
 expect seeds(300).all(|seed| scrubs_well(form(seed)))
+
+# With the built-in rules off and nothing in `redact`, nothing changes
+expect {
+	off = Scrub.rules_from(Off, [], [])
+	unchanged = |text| Scrub.text(text, off) == text
+	seeds(100).all(|seed| unchanged(json_object(seed, 2).text) and unchanged(form(seed)))
+}

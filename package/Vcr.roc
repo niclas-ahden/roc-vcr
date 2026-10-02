@@ -94,6 +94,11 @@ Vcr := [].{
 	##
 	## `mode`: see [Mode]. Defaults to `Replay`.
 	##
+	## `auto_redact`: `Off` turns off the built-in rules below, so that only
+	## `redact`, `remove_headers`, `replace_sensitive_data` and your filters
+	## keep secrets out. Record a cassette again after turning them off,
+	## since the requests it holds were scrubbed by them. Defaults to `On`.
+	##
 	## `redact`: more names whose values are kept out of the cassette, on top
 	## of the built-in ones. Defaults to `[]`.
 	##
@@ -169,6 +174,7 @@ Vcr := [].{
 		cassette_dir : dir,
 		http_send! : Request => Try(Response, err),
 		mode : Mode ?? Replay,
+		auto_redact : [On, Off] ?? On,
 		redact : List(Str) ?? [],
 		dont_redact : List(Str) ?? [],
 		remove_headers : List(Str) ?? [],
@@ -252,7 +258,7 @@ Vcr := [].{
 		filter_request = config.filter_request
 		filter_response = config.filter_response
 		dir = config.cassette_dir
-		filters = filters_from({ redact: config.redact, dont_redact: config.dont_redact }, config.remove_headers, config.replace_sensitive_data)
+		filters = filters_from({ auto_redact: config.auto_redact, redact: config.redact, dont_redact: config.dont_redact }, config.remove_headers, config.replace_sensitive_data)
 		match_headers = config.match_headers.map(|name| name.with_ascii_lowercased())
 		file = dir.join("${cassette_name}.json")
 		path = file.display()
@@ -368,15 +374,15 @@ replayable = |cassette, filters|
 
 ## The filters of a config, prepared once per client
 Filters : {
-	names : Scrub.Names,
+	rules : Scrub.Rules,
 	remove_headers : List(Str),
 	replace_sensitive_data : List({ find : Str, replace : Str }),
 }
 
 ## The filters of a config, with the headers to remove in lower case
-filters_from : { redact : List(Str), dont_redact : List(Str) }, List(Str), List({ find : Str, replace : Str }) -> Filters
-filters_from = |{ redact, dont_redact }, remove_headers, replace_sensitive_data| {
-	names: Scrub.names_from(redact, dont_redact),
+filters_from : { auto_redact : [On, Off], redact : List(Str), dont_redact : List(Str) }, List(Str), List({ find : Str, replace : Str }) -> Filters
+filters_from = |{ auto_redact, redact, dont_redact }, remove_headers, replace_sensitive_data| {
+	rules: Scrub.rules_from(auto_redact, redact, dont_redact),
 	remove_headers: remove_headers.map(|name| name.with_ascii_lowercased()),
 	replace_sensitive_data,
 }
@@ -398,7 +404,7 @@ clean_response = |response, filters|
 
 ## Scrub a piece of text, then replace the exact text the config names
 clean_text : Str, Filters -> Str
-clean_text = |text, filters| replace_data(Scrub.text(text, filters.names), filters)
+clean_text = |text, filters| replace_data(Scrub.text(text, filters.rules), filters)
 
 ## `text` with what `replace_sensitive_data` finds replaced
 replace_data : Str, Filters -> Str
@@ -410,7 +416,7 @@ clean_headers : List(Header), Filters -> List(Header)
 clean_headers = |headers, filters|
 	headers
 		.keep_if(|header| !(filters.remove_headers.contains(header.name.with_ascii_lowercased())))
-		.map(|header| { name: header.name, value: replace_data(Scrub.header(header.name, header.value, filters.names), filters) })
+		.map(|header| { name: header.name, value: replace_data(Scrub.header(header.name, header.value, filters.rules), filters) })
 
 ## Clean a body. A body that is not UTF-8 is left as it is.
 clean_body : List(U8), Filters -> List(U8)
@@ -691,7 +697,7 @@ test_request =
 		.with_body(Str.to_utf8("{\"account\":\"SECRET\"}"))
 
 test_filters : Filters
-test_filters = filters_from({ redact: [], dont_redact: [] }, ["accept"], [{ find: "SECRET", replace: "[REDACTED]" }])
+test_filters = filters_from({ auto_redact: On, redact: [], dont_redact: [] }, ["accept"], [{ find: "SECRET", replace: "[REDACTED]" }])
 
 expect Vcr.parse_mode("Replace") == Ok(Replace)
 expect Vcr.parse_mode("once") == Ok(Once)

@@ -107,6 +107,7 @@ signed! = Vcr.init!({ ..config, redact: ["signature"] }, "sign_invoice")?
 | `cassette_dir` | your platform's path | required | Where the cassettes are, e.g. `Path.utf8("tests/cassettes")`. Created on the first recording |
 | `http_send!` | `Request => Try(Response, err)` | required | Sends a request for real while recording, e.g. basic-cli's `Http.send!` |
 | `mode` | `Mode` | `Replay` | `Replay`, `Once` or `Replace`, see [Modes](#modes) |
+| `auto_redact` | `[On, Off]` | `On` | `Off` turns off the built-in scrubbing rules, see [Scrubbing only what you name](#scrubbing-only-what-you-name) |
 | `redact` | `List(Str)` | `[]` | More names whose values are kept out of the cassette, see [Keeping secrets out](#keeping-secrets-out-of-cassettes) |
 | `dont_redact` | `List(Str)` | `[]` | Names whose values stay in the cassette after all, see [Leaving a value in](#leaving-a-value-in) |
 | `remove_headers` | `List(Str)` | `[]` | Headers to leave out of the cassette, in any case |
@@ -158,6 +159,16 @@ client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: Ht
 ```
 
 `dont_redact` works on every built-in rule except URL passwords. So `dont_redact: ["lang"]` keeps `lang=en` in a `Cookie` header while `session` stays hidden. A name in both `redact` and `dont_redact` is hidden.
+
+### Scrubbing only what you name
+
+`auto_redact: Off` turns off every built-in rule, for when they hide something your test needs or you would rather name every secret yourself. Then only `redact`, `remove_headers`, `replace_sensitive_data` and your filters keep secrets out:
+
+```roc
+client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: Http.send!, auto_redact: Off, redact: ["authorization", "access_token", "session_id"] }, "billing")?
+```
+
+With the rules off, even `Authorization` and cookies are recorded as they are, so name every secret your test sends or gets, as the example does with `authorization`. That also keeps a replay without the real credentials matching. Record a cassette again after turning the rules off, since the requests it holds were scrubbed by them.
 
 The [API docs](https://niclas-ahden.github.io/roc-vcr/) have the exact rules, such as what happens to JSON numbers and Booleans.
 

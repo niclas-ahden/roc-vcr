@@ -96,7 +96,7 @@ signed! = Vcr.init!({ ..config, redact: ["signature"] }, "sign_invoice")?
 | `http_send!` | `Request => Try(Response, err)` | required | Sends a request for real while recording, e.g. basic-cli's `Http.send!` |
 | `mode` | `Mode` | `Replay` | `Replay`, `Once` or `Replace`, see [Modes](#modes) |
 | `redact` | `List(Str)` | `[]` | More names whose values are kept out of the cassette, see [Keeping secrets out](#keeping-secrets-out-of-cassettes) |
-| `keep` | `List(Str)` | `[]` | Names that end like a secret but hold none, whose values stay in the cassette, see [Tokens that page](#tokens-that-page) |
+| `dont_redact` | `List(Str)` | `[]` | Names whose secrets stay in the cassette after all, see [Leaving a value in](#leaving-a-value-in) |
 | `remove_headers` | `List(Str)` | `[]` | Headers to leave out of the cassette, in any case |
 | `replace_sensitive_data` | `List({ find : Str, replace : Str })` | `[]` | Exact text to replace |
 | `filter_request` | `Request -> Request` | no change | Your own change to every request |
@@ -152,13 +152,17 @@ Because it goes by the name and not the value, this also catches values you don'
 
 Some names end in `token` without holding a secret. A token that says where the next page of results starts is one, and it has to stay: hidden, the requests for every page after the first look the same, and a replay answers all of them with the second page. So a name that ends in `token` and has `page`, `next`, `continuation`, `sync` or `cursor` in it stays, as `pageToken`, `nextPageToken`, `NextToken`, `continuationToken` and `syncToken` do.
 
-For a name that pages under another word, put it in `keep`, found the same way as the built-in names:
+For a name that pages under another word, put it in `dont_redact`:
 
 ```roc
-client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: Http.send!, keep: ["resume_token"] }, "changes")?
+client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: Http.send!, dont_redact: ["resume_token"] }, "changes")?
 ```
 
-`keep` only leaves names that end like a secret. Credentials, cookies, URL passwords and the token after `Bearer` are kept out whatever it says, and so is a name that is in `redact` as well.
+### Leaving a value in
+
+Every rule above finds a secret by a name: the header for `Authorization`, `Proxy-Authorization` and a header whose name holds a secret, its own name for a cookie, `Bearer` for the token after it, and the field for the rest. `dont_redact` takes the secrets found by its names out again, so they stay in the cassette as they are, with nothing inside them replaced. Its names are found the same way as the built-in ones, so `resume_token` also leaves `Resume-Token` and `resumeToken`.
+
+So `dont_redact: ["lang"]` leaves `lang=en` in a `Cookie` header while `session` is still hidden. A name in `redact` as well is kept out, since a secret that leaks into a committed cassette is worse than one hidden by mistake. Only the user and password of a URL have no name, so they are always kept out.
 
 ### Keeping out more
 

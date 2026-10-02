@@ -96,9 +96,9 @@ Vcr := [].{
 	## `redact`: more names whose values are kept out of the cassette, on top
 	## of the ones that always are. Defaults to `[]`.
 	##
-	## `keep`: names that end like a secret but hold none, whose values stay
-	## in the cassette, such as a token that pages through results under a
-	## name the rule below misses. Defaults to `[]`.
+	## `dont_redact`: names whose secrets stay in the cassette after all,
+	## whichever rule below found them, such as a token that pages through
+	## results under a name the paging rule misses. Defaults to `[]`.
 	##
 	## `remove_headers`: names of headers to leave out, in any case. Defaults
 	## to `[]`.
@@ -131,10 +131,16 @@ Vcr := [].{
 	## A token that pages through results is no secret, so it stays: a name
 	## that ends in `token` and has `page`, `next`, `continuation`, `sync` or
 	## `cursor` in it, as `pageToken`, `NextToken` and `continuationToken` do.
-	## So does every name in `keep` that `redact` does not have. Hidden, a
-	## paging token would make the requests for the pages after the first all
-	## look the same, and a replay would answer each of them with the second
-	## page.
+	## Hidden, a paging token would make the requests for the pages after the
+	## first all look the same, and a replay would answer each of them with
+	## the second page.
+	##
+	## Every secret but the user and password of a URL is found by a name:
+	## the header for `Authorization`, `Proxy-Authorization` and a header whose
+	## name holds a secret, its own name for a cookie, `Bearer` for the token
+	## after it, and the field for the rest. A secret found by a name in
+	## `dont_redact` stays as it is, with nothing inside it replaced, unless
+	## `redact` has the name too.
 	##
 	## A name is found in any case and with or without `_` and `-`, so
 	## `access_token`, `Access-Token` and `accessToken` are one name. It is
@@ -156,7 +162,7 @@ Vcr := [].{
 		http_send! : Request => Try(Response, err),
 		mode : Mode ?? Replay,
 		redact : List(Str) ?? [],
-		keep : List(Str) ?? [],
+		dont_redact : List(Str) ?? [],
 		remove_headers : List(Str) ?? [],
 		replace_sensitive_data : List({ find : Str, replace : Str }) ?? [],
 		filter_request : (Request -> Request) ?? |request| request,
@@ -238,7 +244,7 @@ Vcr := [].{
 		filter_request = config.filter_request
 		filter_response = config.filter_response
 		dir = config.cassette_dir
-		filters = filters_from({ redact: config.redact, keep: config.keep }, config.remove_headers, config.replace_sensitive_data)
+		filters = filters_from({ redact: config.redact, dont_redact: config.dont_redact }, config.remove_headers, config.replace_sensitive_data)
 		match_headers = config.match_headers.map(|name| name.with_ascii_lowercased())
 		file = dir.join("${cassette_name}.json")
 		path = file.display()
@@ -359,20 +365,21 @@ Filters : {
 	replace_sensitive_data : List({ find : Str, replace : Str }),
 }
 
-## The names of a config that change which values [is_secret_name] hides:
-## `redact` adds names, and `keep` takes out names that end like a secret
+## The names of a config that change what is redacted: `redact` adds names
+## to the ones [is_secret_name] finds, and `dont_redact` names the secrets
+## that stay, unless `redact` names them too
 Names : {
 	redact : List(Str),
-	keep : List(Str),
+	dont_redact : List(Str),
 }
 
 ## The filters of a config, with the names [normalized] and the headers to
 ## remove in lower case
 filters_from : Names, List(Str), List({ find : Str, replace : Str }) -> Filters
-filters_from = |{ redact, keep }, remove_headers, replace_sensitive_data| {
+filters_from = |{ redact, dont_redact }, remove_headers, replace_sensitive_data| {
 	names: {
 		redact: redact.map(|name| normalized(name.to_utf8())),
-		keep: keep.map(|name| normalized(name.to_utf8())),
+		dont_redact: dont_redact.map(|name| normalized(name.to_utf8())),
 	},
 	remove_headers: remove_headers.map(|name| name.with_ascii_lowercased()),
 	replace_sensitive_data,
@@ -418,6 +425,40 @@ clean_body = |bytes, filters|
 	}
 
 # Scrubbing secrets
+#
+# Scrubbing finds every secret first, each with the name it was found by,
+# and then [replace_secrets] replaces the ones `dont_redact` does not name.
+
+## A secret in some text: the bytes from `start` to `end`, what replaces
+## them, and the [normalized] name it was found by. The user and password of
+## a URL have no name, so theirs is empty.
+Secret : { start : U64, end : U64, replacement : List(U8), name : Str }
+
+## `text` with its `secrets` replaced, except the ones [is_kept]. The secrets
+## are in order and do not overlap. One that is kept stays as it is, with
+## nothing inside it replaced.
+replace_secrets : Str, List(Secret), Names -> Str
+replace_secrets = |text, secrets, names| {
+	replaced = secrets.keep_if(|secret| !is_kept(secret.name, names))
+	if replaced.is_empty() {
+		text
+	} else {
+		bytes = text.to_utf8()
+		var $out = []
+		var $copied = 0
+		for secret in replaced {
+			$out = $out.concat(bytes.sublist({ start: $copied, len: secret.start - $copied })).concat(secret.replacement)
+			$copied = secret.end
+		}
+		# Every secret starts and ends on a character boundary
+		Str.from_utf8_lossy($out.concat(bytes.sublist({ start: $copied, len: bytes.len() - $copied })))
+	}
+}
+
+## Whether `dont_redact` has the [normalized] name a secret was found by and
+## `redact` does not. A secret with no name is never kept.
+is_kept : Str, Names -> Bool
+is_kept = |name, names| !name.is_empty() and names.dont_redact.contains(name) and !names.redact.contains(name)
 
 ## What replaces the user and password of a URL and the credentials of a
 ## request
@@ -460,95 +501,108 @@ is_paging_token : Str -> Bool
 is_paging_token = |key| key.ends_with("token") and paging_words.any(|word| key.contains(word))
 
 ## Whether the [normalized] name `key` holds a secret: `redact` has it, or it
-## ends in one of the [secret_endings] and is neither a paging token nor in
-## `keep`
+## ends in one of the [secret_endings] and is not a paging token
 is_secret_name : Str, Names -> Bool
 is_secret_name = |key, names|
-	names.redact.contains(key) or (secret_endings.any(|ending| key.ends_with(ending)) and !is_paging_token(key) and !names.keep.contains(key))
+	names.redact.contains(key) or (secret_endings.any(|ending| key.ends_with(ending)) and !is_paging_token(key))
 
-## The value of the header `name` with its secrets replaced. `Authorization`
-## keeps its scheme, as in `Bearer <CREDENTIALS>`, and a cookie header keeps
-## the name of every cookie, as in `session=<SESSION>`. A header whose own
-## name holds a secret loses its whole value, and any other is [scrub]bed.
+## The value of the header `name` with its secrets replaced, except the
+## ones `dont_redact` names
 scrub_header : Str, Str, Names -> Str
-scrub_header = |name, value, names| {
+scrub_header = |name, value, names| replace_secrets(value, header_secrets(name, value, names), names)
+
+## The secrets in the value of the header `name`. `Authorization` hides its
+## credentials and keeps its scheme, as in `Bearer <CREDENTIALS>`, and a
+## cookie header hides the value of every cookie and keeps its name, as in
+## `session=<SESSION>`. A header whose own name holds a secret hides its
+## whole value, and any other has the [secrets_in] its value.
+header_secrets : Str, Str, Names -> List(Secret)
+header_secrets = |name, value, names| {
 	key = normalized(name.to_utf8())
+	bytes = value.to_utf8()
+	whole = |replacement| [{ start: 0, end: bytes.len(), replacement: replacement.to_utf8(), name: key }]
 	if value.is_empty() {
-		value
+		[]
 	} else if key == "authorization" or key == "proxyauthorization" {
 		match value.trim().split_first(" ") {
-			Ok({ before, after }) if !after.trim().is_empty() => "${before} ${credentials}"
-			_ => credentials
+			Ok({ before, after }) if !after.trim().is_empty() => whole("${before} ${credentials}")
+			_ => whole(credentials)
 		}
 	} else if key == "cookie" {
-		Str.join_with(value.split_on(";").map(hide_cookie), ";")
+		cookie_secrets(bytes, bytes.len())
 	} else if key == "setcookie" {
 		# Only the first part is the cookie, the rest are its attributes
-		match value.split_first(";") {
-			Ok({ before, after }) => "${hide_cookie(before)};${after}"
-			Err(NotFound) => hide_cookie(value)
-		}
+		cookie_secrets(bytes, token_end(bytes, 0, |byte| byte == ';'))
 	} else if is_secret_name(key, names) {
-		placeholder(name)
+		whole(placeholder(name))
 	} else {
-		scrub(value, names)
+		secrets_in(bytes, names)
 	}
 }
 
-## One cookie, `name=value`, with its value replaced by its name in upper
-## case. An empty one is left as it is.
-hide_cookie : Str -> Str
-hide_cookie = |part|
-	match part.split_first("=") {
-		Ok({ before, after }) =>
-			if after.trim().is_empty() {
-				part
-			} else {
-				"${before}=${placeholder(before.trim())}"
-			}
-		Err(NotFound) =>
-			if part.trim().is_empty() {
-				part
-			} else if part.starts_with(" ") {
-				" ${nameless_cookie}"
-			} else {
-				nameless_cookie
-			}
+## The value of every cookie in `bytes` up to `end`, where cookies are
+## separated by `;`
+cookie_secrets : List(U8), U64 -> List(Secret)
+cookie_secrets = |bytes, end| {
+	var $secrets = []
+	var $start = 0
+	while $start <= end {
+		part_end = token_end(bytes, $start, |byte| byte == ';')
+		$secrets = $secrets.concat(cookie_secret(bytes, $start, part_end))
+		$start = part_end + 1
 	}
+	$secrets
+}
 
-## `text` with every secret in it replaced: the user and password of a URL,
-## the token after `Bearer`, and the value of every name that
-## [is_secret_name]. One pass, so a big body takes no longer than it has to.
+## The value of the cookie from `start` to `end`, `name=value`, found by its
+## name and replaced by it in upper case. A cookie with no name is found by
+## none and becomes `<COOKIE>`. An empty one has no secret.
+cookie_secret : List(U8), U64, U64 -> List(Secret)
+cookie_secret = |bytes, start, end| {
+	text = |from, to| Str.from_utf8_lossy(bytes.sublist({ start: from, len: to - from }))
+	equals = token_end(bytes, start, |byte| byte == '=')
+	if equals < end {
+		cookie_name = text(start, equals).trim()
+		if text(equals + 1, end).trim().is_empty() {
+			[]
+		} else {
+			[{ start: equals + 1, end, replacement: placeholder(cookie_name).to_utf8(), name: normalized(cookie_name.to_utf8()) }]
+		}
+	} else if text(start, end).trim().is_empty() {
+		[]
+	} else {
+		# The blank after the `;` before it stays
+		hidden = if bytes.get(start) == Ok(' ') start + 1 else start
+		[{ start: hidden, end, replacement: nameless_cookie.to_utf8(), name: "" }]
+	}
+}
+
+## `text` with every secret in it replaced, except the ones `dont_redact`
+## names
 scrub : Str, Names -> Str
-scrub = |text, names| {
-	bytes = text.to_utf8()
+scrub = |text, names| replace_secrets(text, secrets_in(text.to_utf8(), names), names)
+
+## The secrets in `bytes`, in order: the user and password of a URL, the
+## token after `Bearer`, and the value of every name that [is_secret_name].
+## One pass, so a big body takes no longer than it has to.
+secrets_in : List(U8), Names -> List(Secret)
+secrets_in = |bytes, names| {
 	len = bytes.len()
-	var $out = []
-	var $copied = 0
+	var $secrets = []
 	var $i = 0
 	while $i < len {
 		match secret_at(bytes, $i, names) {
-			Found({ start, end, replacement }) => {
-				$out = $out.concat(bytes.sublist({ start: $copied, len: start - $copied })).concat(replacement)
-				$copied = end
-				$i = end
+			Found(secret) => {
+				$secrets = $secrets.append(secret)
+				$i = secret.end
 			}
 			Next(next) => {
 				$i = next
 			}
 		}
 	}
-	if $copied == 0 {
-		text
-	} else {
-		# Only ASCII was spliced in, at ASCII boundaries
-		Str.from_utf8_lossy($out.concat(bytes.sublist({ start: $copied, len: len - $copied })))
-	}
+	$secrets
 }
-
-## A secret in some text: the bytes from `start` to `end`, and what replaces
-## them
-Secret : { start : U64, end : U64, replacement : List(U8) }
 
 ## The secret that starts at `index`, or the index to look at next. A name
 ## is read whole, so every byte is looked at about once.
@@ -570,7 +624,7 @@ secret_at = |bytes, index, names| {
 				Err(NotFound)
 			}
 		match found {
-			Ok(secret) => Found(secret)
+			Ok({ start, end, replacement }) => Found({ start, end, replacement, name: key })
 			Err(NotFound) => Next(name_end)
 		}
 	} else {
@@ -595,7 +649,7 @@ user_info_at = |bytes, index| {
 		Ok(after) => {
 			end = token_end(bytes, after, |byte| !is_authority_byte(byte))
 			match last_index_of(bytes, '@', after, end) {
-				Ok(at) if at > after => Found({ start: after, end: at, replacement: credentials.to_utf8() })
+				Ok(at) if at > after => Found({ start: after, end: at, replacement: credentials.to_utf8(), name: "" })
 				_ => Next(after)
 			}
 		}
@@ -604,7 +658,7 @@ user_info_at = |bytes, index| {
 }
 
 ## The token after `Bearer` and a space, where `Bearer` ends at `name_end`
-bearer_token : List(U8), U64 -> Try(Secret, [NotFound])
+bearer_token : List(U8), U64 -> Try({ start : U64, end : U64, replacement : List(U8) }, [NotFound])
 bearer_token = |bytes, name_end|
 	if bytes.get(name_end) == Ok(' ') {
 		start = skip_spaces(bytes, name_end)
@@ -621,7 +675,7 @@ bearer_token = |bytes, name_end|
 ## replaced inside its quotes, an object, a list, `null` and a Boolean are
 ## left, and any other value after a quoted name becomes a quoted
 ## placeholder, so JSON stays valid.
-value_of : List(U8), U64, U64 -> Try(Secret, [NotFound])
+value_of : List(U8), U64, U64 -> Try({ start : U64, end : U64, replacement : List(U8) }, [NotFound])
 value_of = |bytes, name_start, name_end| {
 	name = Str.from_utf8_lossy(bytes.sublist({ start: name_start, len: name_end - name_start }))
 	hidden = placeholder(name).to_utf8()
@@ -1092,9 +1146,9 @@ encode_body = |bytes|
 pairs : List(Header) -> List((Str, Str))
 pairs = |headers| headers.map(|header| (header.name, header.value))
 
-## The [Names] of a config with `redact` and `keep`
+## The [Names] of a config with `redact` and `dont_redact`
 names_of : List(Str), List(Str) -> Names
-names_of = |redact, keep| filters_from({ redact, keep }, [], []).names
+names_of = |redact, dont_redact| filters_from({ redact, dont_redact }, [], []).names
 
 ## The [Names] of a config that names none
 no_names : Names
@@ -1117,7 +1171,7 @@ test_request =
 		.with_body(Str.to_utf8("{\"account\":\"SECRET\"}"))
 
 test_filters : Filters
-test_filters = filters_from({ redact: [], keep: [] }, ["accept"], [{ find: "SECRET", replace: "[REDACTED]" }])
+test_filters = filters_from({ redact: [], dont_redact: [] }, ["accept"], [{ find: "SECRET", replace: "[REDACTED]" }])
 
 expect Vcr.parse_mode("Replace") == Ok(Replace)
 expect Vcr.parse_mode("once") == Ok(Once)
@@ -1234,15 +1288,31 @@ expect {
 expect scrubbed("{\"items\":[],\"nextPageToken\":\"CAUQAA\"}", []) == "{\"items\":[],\"nextPageToken\":\"CAUQAA\"}"
 expect scrub_header("X-Next-Page-Token", "CAUQAA", no_names) == "CAUQAA"
 
-# A name in `keep` is left, found the way any name is
+# A name in `dont_redact` is left, found the way any name is
 expect scrub("resume_token=a&Marker-Token=b&refresh_token=c", names_of([], ["resumeToken", "marker_token"])) == "resume_token=a&Marker-Token=b&refresh_token=<REFRESH_TOKEN>"
 expect scrub_header("X-Resume-Token", "abc", names_of([], ["x_resume_token"])) == "abc"
 
-# `redact` wins over `keep` and the paging rule, and `keep` leaves what is
-# hidden by more than its name
+# `redact` wins over the paging rule and over `dont_redact`, whichever rule
+# found the secret
 expect scrub("page_token=a&x_token=b", names_of(["page_token", "x_token"], ["x_token"])) == "page_token=<PAGE_TOKEN>&x_token=<X_TOKEN>"
-expect scrub_header("Authorization", "Bearer abc", names_of([], ["authorization"])) == "Bearer <CREDENTIALS>"
-expect scrub("Bearer abc postgres://u:p@db", names_of([], ["bearer"])) == "Bearer <CREDENTIALS> postgres://<CREDENTIALS>@db"
+expect scrub_header("Authorization", "Bearer abc", names_of(["authorization"], ["authorization"])) == "Bearer <CREDENTIALS>"
+expect scrub_header("Cookie", "lang=en", names_of(["lang"], ["lang"])) == "lang=<LANG>"
+
+# `dont_redact` takes out what any rule found, by the name it was found by
+expect scrub_header("Authorization", "Bearer abc", names_of([], ["authorization"])) == "Bearer abc"
+expect scrub_header("Cookie", "session=abc; lang=en; flag", names_of([], ["lang"])) == "session=<SESSION>; lang=en; <COOKIE>"
+expect scrub_header("Set-Cookie", "lang=en; Path=/", names_of([], ["lang"])) == "lang=en; Path=/"
+expect scrub("Bearer abc postgres://u:p@db", names_of([], ["bearer"])) == "Bearer abc postgres://<CREDENTIALS>@db"
+
+# The user and password of a URL have no name, so no name keeps them
+expect scrub("postgres://u:p@db", names_of([], ["", "_", "postgres"])) == "postgres://<CREDENTIALS>@db"
+
+# A value that stays is left whole, and the secrets after it are still found
+expect {
+	inner = json_string("{\"password\":\"x\"}")
+	text = "{\"sync_secret\":${inner},\"password\":\"y\"}"
+	scrub(text, names_of([], ["sync_secret"])) == "{\"sync_secret\":${inner},\"password\":\"<PASSWORD>\"}"
+}
 
 # Scrubbing again changes nothing more
 expect

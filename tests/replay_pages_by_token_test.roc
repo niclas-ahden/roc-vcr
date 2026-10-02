@@ -64,21 +64,21 @@ all_items! = |client!, param, next_field| {
 ## Record three pages, then replay them. Every request after the first sends
 ## the token of its page, so the token has to stay in the cassette for the
 ## requests to differ.
-pages_replay! = |cassette_name, param, next_field, keep| {
+pages_replay! = |cassette_name, param, next_field, dont_redact| {
 	Support.reset!(cassette_name)?
 
-	record! = Vcr.init!({ ..Support.config(Once), http_send!: paged_api(param, next_field), keep }, cassette_name)?
+	record! = Vcr.init!({ ..Support.config(Once), http_send!: paged_api(param, next_field), dont_redact }, cassette_name)?
 	Assert.eq(all_items!(record!, param, next_field)?, ["a", "b", "c"])?
 
 	json = Support.read_cassette!(cassette_name)?
 	Assert.contains(json, "${param}=CAoQAA")?
 
-	replay! = Vcr.init!({ ..Support.replay_config, keep }, cassette_name)?
+	replay! = Vcr.init!({ ..Support.replay_config, dont_redact }, cassette_name)?
 	Assert.eq(all_items!(replay!, param, next_field)?, ["a", "b", "c"])
 }
 
 ## A token that pages through results ends in `token` like a secret, but it
-## stays in the cassette, by the built-in paging names or by `keep`.
+## stays in the cassette, by the built-in paging names or by `dont_redact`.
 main! : List(OsStr) => Try({}, _)
 main! = |_args| {
 	pages_replay!("replay_pages_by_token", "pageToken", "nextPageToken", [])?

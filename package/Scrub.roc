@@ -509,7 +509,7 @@ scrubbed = |text, redact| Scrub.text(text, Scrub.names_from(redact, []))
 
 ## `text` as a JSON string, to put JSON inside JSON
 json_string : Str -> Str
-json_string = |text| "\"${text.replace_each("\\", "\\\\").replace_each("\"", "\\\"")}\""
+json_string = |text| "\"${text.replace_each("\\", "\\\\").replace_each("\"", "\\\"").replace_each("\n", "\\n")}\""
 
 # Headers
 expect Scrub.header("Authorization", "Bearer abc", no_names) == "Bearer <CREDENTIALS>"
@@ -637,3 +637,185 @@ expect
 			scrubbed(once, ["pin"]) == once
 		},
 	)
+
+# Generated input
+#
+# Texts built from random names, values and blanks, to check what holds for
+# any input: valid JSON stays valid, scrubbing again changes nothing, and no
+# secret survives. Every secret holds the text [leak] or the number 90210,
+# and nothing else does.
+
+## What every generated secret holds
+leak : Str
+leak = "S3CR3T"
+
+## The next state of a 64-bit linear congruential generator, enough to
+## spread test cases
+next_seed : U64 -> U64
+next_seed = |seed| seed.times_wrap(6364136223846793005).plus_wrap(1442695040888963407)
+
+## A number below `below`, and the seed to use next
+random : U64, U64 -> { n : U64, seed : U64 }
+random = |seed, below| {
+	next = next_seed(seed)
+	{ n: next.shr_zf_wrap(33) % below, seed: next }
+}
+
+## One of `items`, and the seed to use next
+random_item : U64, List(Str) -> { text : Str, seed : U64 }
+random_item = |seed, items| {
+	index = random(seed, items.len())
+	{ text: items.get(index.n) ?? "", seed: index.seed }
+}
+
+## `count` seeds to start a test case from
+seeds : U64 -> List(U64)
+seeds = |count| {
+	var $seeds = []
+	var $seed = 1
+	while $seeds.len() < count {
+		$seed = next_seed($seed)
+		$seeds = $seeds.append($seed)
+	}
+	$seeds
+}
+
+## Names that hold a secret, built-in and in [generated_names]
+secret_names : List(Str)
+secret_names = ["access_token", "password", "clientSecret", "API-KEY", "pin"]
+
+## Names that hold none, some of which look as if they did
+plain_names : List(Str)
+plain_names = ["id", "user", "has_password", "token_type", "nextPageToken", "author", "note"]
+
+## The names of the config every generated text is scrubbed with
+generated_names : Scrub.Names
+generated_names = Scrub.names_from(["pin"], [])
+
+## JSON values for a secret name
+secret_json_values : List(Str)
+secret_json_values = [
+	"\"${leak}\"",
+	"\"${leak} \\\"quoted\\\"\"",
+	"\"${leak}\\\\\"",
+	"\"é ${leak}\"",
+	"90210",
+	"-90210.5e3",
+	"\"proof-of-<ACCESS_TOKEN>-${leak}\"",
+	"true",
+	"null",
+	"[1, 2]",
+]
+
+## JSON values for a plain name. A secret in one is found by what it is.
+plain_json_values : List(Str)
+plain_json_values = [
+	"\"bob\"",
+	"\"a \\\"quoted\\\" word\"",
+	"\"back\\\\slash\\\\\"",
+	"12",
+	"-1.5e3",
+	"false",
+	"null",
+	"[\"x\", 2]",
+	"{}",
+	"\"Invalid token: abc\"",
+	"\"https://example.com/x?y=1\"",
+	"\"https://example.com/?email=a@b.com\"",
+	"\"postgres://app:${leak}@db/app\"",
+	"\"Bearer ${leak}\"",
+]
+
+## What may stand after a comma or a bracket, as an encoder lays JSON out
+breaks : List(Str)
+breaks = ["", " ", "\n  "]
+
+## What may stand around a colon
+blanks : List(Str)
+blanks = ["", " "]
+
+## A JSON object of one to four fields. While `depth` lasts, a value may be
+## an object or JSON in a JSON string, built the same way.
+json_object : U64, U64 -> { text : Str, seed : U64 }
+json_object = |seed, depth| {
+	count = random(seed, 4)
+	spacing = random_item(count.seed, breaks)
+	blank = random_item(spacing.seed, blanks)
+	var $seed = blank.seed
+	var $fields = []
+	while $fields.len() <= count.n {
+		field = json_field($seed, depth, blank.text)
+		$fields = $fields.append(field.text)
+		$seed = field.seed
+	}
+	{ text: "{${spacing.text}${Str.join_with($fields, ",${spacing.text}")}${spacing.text}}", seed: $seed }
+}
+
+## One field of a [json_object], `"name": value`
+json_field : U64, U64, Str -> { text : Str, seed : U64 }
+json_field = |seed, depth, blank| {
+	secret = random(seed, 2)
+	name = random_item(secret.seed, if secret.n == 0 secret_names else plain_names)
+	kind = random(name.seed, 5)
+	value =
+		if depth > 0 and kind.n == 0 {
+			inner = json_object(kind.seed, depth - 1)
+			{ text: json_string(inner.text), seed: inner.seed }
+		} else if depth > 0 and kind.n == 1 {
+			json_object(kind.seed, depth - 1)
+		} else {
+			random_item(kind.seed, if secret.n == 0 secret_json_values else plain_json_values)
+		}
+	{ text: "\"${name.text}\"${blank}:${blank}${value.text}", seed: value.seed }
+}
+
+## Values for a query or form parameter
+form_values : List(Str)
+form_values = ["bob", "1", "a%20b", leak, "${leak}.x-y", "<ACCESS_TOKEN>${leak}", "https://example.com/x", "https://u:${leak}@h.se/x"]
+
+## A query string of one to four parameters, `name=value&...`. A value with
+## the [leak] in it goes under a secret name or holds a URL with a password.
+form : U64 -> Str
+form = |seed| {
+	count = random(seed, 4)
+	var $seed = count.seed
+	var $params = []
+	while $params.len() <= count.n {
+		secret = random($seed, 2)
+		name = random_item(secret.seed, if secret.n == 0 secret_names else plain_names)
+		value = random_item(name.seed, form_values)
+		safe = secret.n == 0 or !value.text.contains(leak) or value.text.contains("://")
+		$params = $params.append("${name.text}=${if safe value.text else "plain"}")
+		$seed = value.seed
+	}
+	Str.join_with($params, "&")
+}
+
+## Whether `text` is valid JSON
+is_json : Str -> Bool
+is_json = |text| {
+	parsed : Try({}, _)
+	parsed = Json.parse(text)
+	parsed.is_ok()
+}
+
+## Whether scrubbing `text` hides every secret in it, and scrubbing again
+## changes nothing
+scrubs_well : Str -> Bool
+scrubs_well = |text| {
+	once = Scrub.text(text, generated_names)
+	!once.contains(leak) and !once.contains("90210") and Scrub.text(once, generated_names) == once
+}
+
+# Valid JSON stays valid, every secret is gone, and scrubbing again changes
+# nothing
+expect
+	seeds(300).all(
+		|seed| {
+			text = json_object(seed, 2).text
+			is_json(text) and is_json(Scrub.text(text, generated_names)) and scrubs_well(text)
+		},
+	)
+
+# The same for query strings
+expect seeds(300).all(|seed| scrubs_well(form(seed)))

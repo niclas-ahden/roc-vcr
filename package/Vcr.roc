@@ -617,11 +617,6 @@ response_from = |status, headers, body|
 ## Convert a parsed cassette file to a [Vcr.Cassette]
 stored_to_cassette : StoredCassette -> Try(Vcr.Cassette, [CassetteDecodeFailed(Str)])
 stored_to_cassette = |stored| {
-	# WORKAROUND: roc-lang/roc#11471. The parsed value comes here whole from
-	# `decode_cassette`. Mapping its `interactions` field right where it is
-	# parsed passes `roc check` and panics `roc test` and every build with
-	# "checked generated codec contract was missing required method call
-	# parse_record_field". Nothing to undo when fixed beyond this comment.
 	interactions = stored.interactions.map_try(
 		|{ request, response }| {
 			request_body = body_from_stored({ body: request.body, body_base64: request.body_base64 })?

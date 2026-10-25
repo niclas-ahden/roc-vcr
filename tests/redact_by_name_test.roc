@@ -1,5 +1,5 @@
 app [main!] {
-	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.28.0/AP9SGT1yrhCKcFxKcoA5tBkNCM6ibBjBxcQGMTb6krev.tar.zst",
+	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.30.0/6XAUy48Jp34GANurMrMf74DtF7NdpkhnqFLHE4gHNzJy.tar.zst",
 	http: "https://github.com/roc-lang/http/releases/download/2.0.0/6ZUwqYhCS8PU9Mo6MF7oV82ET2o7KYb57CLKDq4cq4sS.tar.zst",
 	spec: "https://github.com/niclas-ahden/roc-spec/releases/download/0.6.0/9ThTkhd7zrviwQpM3LvGd7pvzGhr4ZXNmWJV7pTJc9AJ.tar.zst",
 	vcr: "../package/main.roc",
@@ -30,12 +30,13 @@ graph_send! = |req| {
 }
 
 ## Ask for the insights the way the code under test would
+insights! : (Request => Try(Response, err)), Str => Try(Response, [NoPageToken, HttpFailed(Str)])
 insights! = |client!, user_token| {
-	accounts = client!(Support.request(GET, "https://graph.test/me/accounts?access_token=${user_token}"))?
+	accounts = client!(Support.request(GET, "https://graph.test/me/accounts?access_token=${user_token}")) ? |e| HttpFailed(Str.inspect(e))
 	after_field = Str.from_utf8_lossy(accounts.body()).split_first("\"access_token\":\"") ? |_| NoPageToken
 	page_token = after_field.after.split_first("\"") ? |_| NoPageToken
 	proof = "proof-of-${page_token.before}"
-	client!(Support.request(GET, "https://graph.test/1/insights?access_token=${page_token.before}&appsecret_proof=${proof}"))
+	Ok(client!(Support.request(GET, "https://graph.test/1/insights?access_token=${page_token.before}&appsecret_proof=${proof}")) ? |e| HttpFailed(Str.inspect(e)))
 }
 
 ## Values redacted by name stay out of the cassette wherever they are, the

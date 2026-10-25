@@ -1,5 +1,5 @@
 app [main!] {
-	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.28.0/AP9SGT1yrhCKcFxKcoA5tBkNCM6ibBjBxcQGMTb6krev.tar.zst",
+	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.30.0/6XAUy48Jp34GANurMrMf74DtF7NdpkhnqFLHE4gHNzJy.tar.zst",
 	http: "https://github.com/roc-lang/http/releases/download/2.0.0/6ZUwqYhCS8PU9Mo6MF7oV82ET2o7KYb57CLKDq4cq4sS.tar.zst",
 	spec: "https://github.com/niclas-ahden/roc-spec/releases/download/0.6.0/9ThTkhd7zrviwQpM3LvGd7pvzGhr4ZXNmWJV7pTJc9AJ.tar.zst",
 	vcr: "../package/main.roc",
@@ -41,12 +41,13 @@ field = |json, name| {
 
 ## Every item, page by page, the way the code under test would fetch them.
 ## A client that answers the same page over and over makes it give up.
+all_items! : (Request => Try(Response, err)), Str, Str => Try(List(Str), [NoItem(Str), StuckOnAPage(List(Str)), HttpFailed(Str)])
 all_items! = |client!, param, next_field| {
 	var $items = []
 	var $query = ""
 	var $more = Bool.True
 	while $more and $items.len() < 10 {
-		response = client!(Support.request(GET, "https://api.test.com/videos?part=id${$query}"))?
+		response = client!(Support.request(GET, "https://api.test.com/videos?part=id${$query}")) ? |e| HttpFailed(Str.inspect(e))
 		body = Str.from_utf8_lossy(response.body())
 		$items = $items.append(field(body, "item") ? |_| NoItem(body))
 		match field(body, next_field) {

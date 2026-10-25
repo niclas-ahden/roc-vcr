@@ -21,7 +21,7 @@ Support :: [].{
 
 	## Answers 200 with the method, URI and body of the request echoed in the
 	## body, so a test can tell which request a response belongs to.
-	http_send! : Request => Try(Response, [MockHttpError])
+	http_send! : Request => Try(Response, [MockHttpError, ..others])
 	http_send! = |req|
 		Ok(
 			Response.from_status(200)
@@ -30,12 +30,12 @@ Support :: [].{
 		)
 
 	## Fails on every request. For clients that must answer from the cassette.
-	no_http! : Request => Try(Response, [UnexpectedHttpRequest(Str)])
+	no_http! : Request => Try(Response, [UnexpectedHttpRequest(Str), ..others])
 	no_http! = |req| Err(UnexpectedHttpRequest(req.uri()))
 
 	## A `Replay` config reading from [cassette_dir], with [no_http!] as its
 	## `http_send!` so a request that reaches the network fails the test.
-	replay_config : Vcr.Config(Path, _)
+	replay_config : Vcr.Config(Path, Vcr.Error([UnexpectedHttpRequest(Str)]))
 	replay_config = { cassette_dir, http_send!: no_http!, mode: Replay }
 
 	## A config for `mode` that records from the mock into [cassette_dir].

@@ -10,7 +10,7 @@
 ##
 ## Run from the repository root: `roc examples/example.roc`
 app [main!] {
-	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.28.0/AP9SGT1yrhCKcFxKcoA5tBkNCM6ibBjBxcQGMTb6krev.tar.zst",
+	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.30.0/6XAUy48Jp34GANurMrMf74DtF7NdpkhnqFLHE4gHNzJy.tar.zst",
 	http: "https://github.com/roc-lang/http/releases/download/2.0.0/6ZUwqYhCS8PU9Mo6MF7oV82ET2o7KYb57CLKDq4cq4sS.tar.zst",
 	vcr: "../package/main.roc",
 }
@@ -40,7 +40,7 @@ main! = |_args| {
 
 	# One client per cassette. Wherever your code takes `Http.send!`, a test
 	# hands it the client instead.
-	client! = Vcr.init!({ cassette_dir: Path.utf8("examples/cassettes"), http_send!: Http.send!, mode }, "example_cassette")?
+	client! = Vcr.init!({ cassette_dir: Path.utf8("examples/cassettes"), http_send!: |request| Http.send!(request, {}), mode }, "example_cassette")?
 
 	Stdout.line!(repo_summary!(client!, "roc-lang/roc")?)
 }

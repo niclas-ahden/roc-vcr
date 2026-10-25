@@ -1,5 +1,5 @@
 app [main!] {
-	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.28.0/AP9SGT1yrhCKcFxKcoA5tBkNCM6ibBjBxcQGMTb6krev.tar.zst",
+	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.30.0/6XAUy48Jp34GANurMrMf74DtF7NdpkhnqFLHE4gHNzJy.tar.zst",
 	http: "https://github.com/roc-lang/http/releases/download/2.0.0/6ZUwqYhCS8PU9Mo6MF7oV82ET2o7KYb57CLKDq4cq4sS.tar.zst",
 	spec: "https://github.com/niclas-ahden/roc-spec/releases/download/0.6.0/9ThTkhd7zrviwQpM3LvGd7pvzGhr4ZXNmWJV7pTJc9AJ.tar.zst",
 	vcr: "../package/main.roc",
@@ -27,7 +27,7 @@ fetch_status! = |send!, uri| {
 ## How an app calls it. Never run, since no test touches the network, but
 ## checked, so basic-cli's `Http.send!` fits where the client does.
 fetch_status_live! : Str => Try(U16, _)
-fetch_status_live! = |uri| fetch_status!(Http.send!, uri)
+fetch_status_live! = |uri| fetch_status!(|request| Http.send!(request, {}), uri)
 
 ## A client has the type of `http_send!`, so the same code runs with the real
 ## thing, with a client that records and with one that replays.

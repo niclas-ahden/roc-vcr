@@ -40,11 +40,11 @@ Invoices :: [].{
 }
 ```
 
-Your app passes it basic-cli's `Http.send!`, as in `Invoices.get!(Http.send!, token, "42")`. A test passes a VCR client instead. The client has the same type, since both take and return the `Request` and `Response` of [roc-lang/http](https://github.com/roc-lang/http):
+Your app passes it basic-cli's `Http.send!` with its send options given, as in `Invoices.get!(|request| Http.send!(request, {}), token, "42")`. A test passes a VCR client instead. The client has the same type, since both take and return the `Request` and `Response` of [roc-lang/http](https://github.com/roc-lang/http):
 
 ```roc
 app [main!] {
-	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.28.0/AP9SGT1yrhCKcFxKcoA5tBkNCM6ibBjBxcQGMTb6krev.tar.zst",
+	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.30.0/6XAUy48Jp34GANurMrMf74DtF7NdpkhnqFLHE4gHNzJy.tar.zst",
 	http: "https://github.com/roc-lang/http/releases/download/2.0.0/6ZUwqYhCS8PU9Mo6MF7oV82ET2o7KYb57CLKDq4cq4sS.tar.zst",
 	vcr: "https://github.com/niclas-ahden/roc-vcr/releases/download/0.2.1/2AU7Qe7S18zVCv7gnuipacybmAaQYbN6RqNehMKiJ95C.tar.zst",
 }
@@ -63,7 +63,10 @@ main! = |_args| {
 	# Only recording sends the token. A replay never sends a request.
 	token = Env.var_str!(OsStr.from_str("API_TOKEN")) ?? "unused"
 
-	client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: Http.send!, mode }, "invoice")?
+	# WORKAROUND: a lambda rather than `Http.send!` itself, because a package
+	# passing a bare `{}` as its `SendOptions` crashes Roc 54283d4. Pass
+	# `Http.send!` once roc-lang/roc#12606 is fixed.
+	client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: |request| Http.send!(request, {}), mode }, "invoice")?
 	invoice = Invoices.get!(client!, token, "42")?
 
 	if invoice.amount == 1200 Ok({}) else Err(WrongAmount(invoice.amount))
@@ -96,7 +99,8 @@ Only `cassette_dir` and `http_send!` are required. Every other field has a defau
 
 ```roc
 config : Vcr.Config(_, _)
-config = { cassette_dir: Path.utf8("tests/cassettes"), http_send!: Http.send!, mode: Replay }
+# WORKAROUND: a lambda until roc-lang/roc#12606 is fixed, see above.
+config = { cassette_dir: Path.utf8("tests/cassettes"), http_send!: |request| Http.send!(request, {}), mode: Replay }
 
 client! = Vcr.init!(config, "create_invoice")?
 signed! = Vcr.init!({ ..config, redact: ["signature"] }, "sign_invoice")?
@@ -105,7 +109,7 @@ signed! = Vcr.init!({ ..config, redact: ["signature"] }, "sign_invoice")?
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `cassette_dir` | your platform's path | required | Where the cassettes are, e.g. `Path.utf8("tests/cassettes")`. Created on the first recording |
-| `http_send!` | `Request => Try(Response, err)` | required | Sends a request for real while recording, e.g. basic-cli's `Http.send!` |
+| `http_send!` | `Request => Try(Response, err)` | required | Sends a request for real while recording, e.g. basic-cli's `Http.send!` with its send options given |
 | `mode` | `Mode` | `Replay` | `Replay`, `Once` or `Replace`, see [Modes](#modes) |
 | `auto_redact` | `[On, Off]` | `On` | `Off` turns off the built-in scrubbing rules, see [Scrubbing only what you name](#scrubbing-only-what-you-name) |
 | `redact` | `List(Str)` | `[]` | More names whose values are kept out of the cassette, see [Keeping secrets out](#keeping-secrets-out-of-cassettes) |
@@ -134,7 +138,8 @@ The scrubber cannot know every API. It misses secrets under other names or with 
 client! = Vcr.init!(
 	{
 		cassette_dir: Path.utf8("tests/cassettes"),
-		http_send!: Http.send!,
+		# WORKAROUND: a lambda until roc-lang/roc#12606 is fixed, see above.
+		http_send!: |request| Http.send!(request, {}),
 		redact: ["key", "sig"],
 		remove_headers: ["X-Request-Id"],
 		replace_sensitive_data: [{ find: account_id, replace: "<ACCOUNT_ID>" }],
@@ -155,7 +160,8 @@ A request is scrubbed the same way before it is matched against the cassette, so
 Some names look like secrets but are not. A token that pages through results has to stay, or the requests for every page after the first look the same. A name that ends in `token` and contains `page`, `next`, `continuation`, `sync` or `cursor`, like `nextPageToken`, stays by default. Put any other such name in `dont_redact`:
 
 ```roc
-client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: Http.send!, dont_redact: ["resume_token"] }, "changes")?
+# WORKAROUND: a lambda until roc-lang/roc#12606 is fixed, see above.
+client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: |request| Http.send!(request, {}), dont_redact: ["resume_token"] }, "changes")?
 ```
 
 `dont_redact` works on every built-in rule except URL passwords. So `dont_redact: ["lang"]` keeps `lang=en` in a `Cookie` header while `session` stays hidden. A name in both `redact` and `dont_redact` is hidden.
@@ -165,7 +171,8 @@ client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: Ht
 `auto_redact: Off` turns off every built-in rule, for when they hide something your test needs or you would rather name every secret yourself. Then only `redact`, `remove_headers`, `replace_sensitive_data` and your filters keep secrets out:
 
 ```roc
-client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: Http.send!, auto_redact: Off, redact: ["authorization", "access_token", "session_id"] }, "billing")?
+# WORKAROUND: a lambda until roc-lang/roc#12606 is fixed, see above.
+client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: |request| Http.send!(request, {}), auto_redact: Off, redact: ["authorization", "access_token", "session_id"] }, "billing")?
 ```
 
 With the rules off, even `Authorization` and cookies are recorded as they are, so name every secret your test sends or gets, as the example does with `authorization`. That also keeps a replay without the real credentials matching. Record a cassette again after turning the rules off, since the requests it holds were scrubbed by them.

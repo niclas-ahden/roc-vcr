@@ -80,7 +80,10 @@ Vcr := [].{
 	## and whatever it changes:
 	##
 	## ```roc
-	## client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: Http.send! }, "github")?
+	## # WORKAROUND: a lambda rather than `Http.send!` itself, because a package
+	## # passing a bare `{}` as its `SendOptions` crashes Roc 54283d4. Pass
+	## # `Http.send!` once roc-lang/roc#12606 is fixed.
+	## client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: |request| Http.send!(request, {}) }, "github")?
 	## ```
 	##
 	## A config bound to a name first has to carry a `Vcr.Config(_, _)`
@@ -90,7 +93,7 @@ Vcr := [].{
 	## [CassetteDir]. It is created when the first cassette is recorded.
 	##
 	## `http_send!`: sends a request for real while recording, such as
-	## basic-cli's `Http.send!`.
+	## basic-cli's `Http.send!` with its send options given, as above.
 	##
 	## `mode`: see [Mode]. Defaults to `Replay`.
 	##
@@ -221,11 +224,14 @@ Vcr := [].{
 
 	## Create a client for the cassette `<cassette_dir>/<cassette_name>.json`.
 	## The client has the type of `http_send!`, so the code under test takes
-	## its HTTP function as an argument and gets `Http.send!` in production and
-	## the client in a test:
+	## its HTTP function as an argument and gets `Http.send!` with its send
+	## options given in production and the client in a test:
 	##
 	## ```roc
-	## client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: Http.send! }, "github")?
+	## # WORKAROUND: a lambda rather than `Http.send!` itself, because a package
+	## # passing a bare `{}` as its `SendOptions` crashes Roc 54283d4. Pass
+	## # `Http.send!` once roc-lang/roc#12606 is fixed.
+	## client! = Vcr.init!({ cassette_dir: Path.utf8("tests/cassettes"), http_send!: |request| Http.send!(request, {}) }, "github")?
 	## repo = fetch_repo!(client!, "roc-lang/roc")?
 	## ```
 	##

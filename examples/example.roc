@@ -1,8 +1,8 @@
 ## Looks up a repository with the GitHub API through a VCR client.
 ##
 ## `repo_summary!` stands for your own code. It takes its HTTP function as an
-## argument, so an app passes basic-cli's `Http.send!` and a test passes a
-## client, which has the same type.
+## argument, so an app passes basic-cli's `Http.send!` with its send options
+## given and a test passes a client, which has the same type.
 ##
 ## The cassette examples/cassettes/example_cassette.json is committed, so this
 ## replays the recorded response and never touches the network. Run it with
@@ -40,7 +40,10 @@ main! = |_args| {
 
 	# One client per cassette. Wherever your code takes `Http.send!`, a test
 	# hands it the client instead.
-	client! = Vcr.init!({ cassette_dir: Path.utf8("examples/cassettes"), http_send!: |request| Http.send!(request, {}), mode }, "example_cassette")?
+	# WORKAROUND: a lambda rather than `Http.send!` itself, because a package
+	# passing a bare `{}` as its `SendOptions` crashes Roc 54283d4. Pass
+	# `Http.send!` once roc-lang/roc#12606 is fixed.
+	client! =Vcr.init!({ cassette_dir: Path.utf8("examples/cassettes"), http_send!: |request| Http.send!(request, {}), mode }, "example_cassette")?
 
 	Stdout.line!(repo_summary!(client!, "roc-lang/roc")?)
 }

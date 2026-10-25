@@ -25,7 +25,12 @@ fetch_status! = |send!, uri| {
 }
 
 ## How an app calls it. Never run, since no test touches the network, but
-## checked, so basic-cli's `Http.send!` fits where the client does.
+## checked, so basic-cli's `Http.send!` fits where the client does, with its
+## send options given.
+##
+## WORKAROUND: a lambda rather than `Http.send!` itself, because a package
+## passing a bare `{}` as its `SendOptions` crashes Roc 54283d4. Pass
+## `Http.send!` once roc-lang/roc#12606 is fixed.
 fetch_status_live! : Str => Try(U16, _)
 fetch_status_live! = |uri| fetch_status!(|request| Http.send!(request, {}), uri)
 

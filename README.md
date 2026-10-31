@@ -46,7 +46,7 @@ Your app passes it basic-cli's `Http.send!` with its send options given, as in `
 app [main!] {
 	pf: platform "https://github.com/niclas-ahden/basic-cli/releases/download/0.30.0/6XAUy48Jp34GANurMrMf74DtF7NdpkhnqFLHE4gHNzJy.tar.zst",
 	http: "https://github.com/roc-lang/http/releases/download/2.0.0/6ZUwqYhCS8PU9Mo6MF7oV82ET2o7KYb57CLKDq4cq4sS.tar.zst",
-	vcr: "https://github.com/niclas-ahden/roc-vcr/releases/download/0.2.1/2AU7Qe7S18zVCv7gnuipacybmAaQYbN6RqNehMKiJ95C.tar.zst",
+	vcr: "https://github.com/niclas-ahden/roc-vcr/releases/download/0.2.2/5ga5z59pDwmvpdq33cHtFgZvyCUAAEQuBu3vAeEzmgH2.tar.zst",
 }
 
 import pf.Env

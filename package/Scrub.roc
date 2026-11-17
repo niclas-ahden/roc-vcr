@@ -24,10 +24,10 @@ Scrub := [].{
 		dont_redact: dont_redact.map(|name| normalized(name.to_utf8())),
 	}
 
-	## `text` with every secret in it replaced, except the ones `dont_redact`
+	## `input` with every secret in it replaced, except the ones `dont_redact`
 	## names
 	text : Str, Rules -> Str
-	text = |text, rules| replace_secrets(text, secrets_in(text.to_utf8(), rules), rules)
+	text = |input, rules| replace_secrets(input, secrets_in(input.to_utf8(), rules), rules)
 
 	## The value of the header `name` with its secrets replaced, except the
 	## ones `dont_redact` names
